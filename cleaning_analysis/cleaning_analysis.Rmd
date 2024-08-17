@@ -9,22 +9,536 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+```{r}
+library(tidyverse)
+```
+cleaning
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+(a)
+1.
+```{r}
+seme1 <- read.csv("semester_data_1.csv")
+seme2 <- read.csv("semester_data_2.csv")
+```
+確認
+```{r}
+head(seme1)
+```
+2.
+```{r}
+colnames(seme1) <- seme1[1,]
+seme1 <- seme1[-1,]
+```
+確認
+```{r}
+head(seme1)
+```
+```{r}
+head(seme2)
+```
+```{r}
+str(seme1)
+str(seme2)
+```
+3.
+事前処理
+```{r}
+seme1_converted <- seme1 %>% 
+  type_convert(col_types = cols(
+    unitid = col_integer(),
+    semester = col_integer(),
+    quarter = col_integer(),
+    year = col_integer(),
+    Y = col_integer()
+  ))
+```
+```{r}
+str(seme1_converted)
+```
+結果
+```{r}
+Binded_seme1_2 <- bind_rows(
+  seme1_converted %>% select(unitid, instnm, semester, quarter, year, Y),
+  seme2 %>% select(unitid = x1, instnm =x2, semester = x3, quarter = x4, year = x5, Y = x6)
+)
+```
+確認
+```{r}
+head(Binded_seme1_2)
+```
+4.
+```{r}
+Binded_seme1_2 <- Binded_seme1_2 %>% select(-Y)
+```
+確認
+```{r}
+head(Binded_seme1_2)
+```
+5.
+```{r}
+seme_with_introduction_year <- Binded_seme1_2 %>%
+  mutate(
+    semester_introduced = case_when(
+      semester == 1 & lag(semester, default = 0) == 0 ~ year,
+      TRUE ~ NA_integer_
+    )
+  ) %>%
+  mutate(semester_introduction_year = min(semester_introduced, na.rm = TRUE)) %>%
+  select(-semester_introduced)  # 一時的な列を削除
+```
+確認
+```{r}
+head(seme_with_introduction_year)
+```
+6.
+```{r}
+seme_with_dummy <- seme_with_introduction_year %>%
+  mutate(semester_dummy = semester)
+```
+確認
+```{r}
+head(seme_with_dummy)
+```
+(b)
+1.
+読み込み
+```{r}
+library(readxl)
+library(here)
+```
+```{r}
+# outcomeフォルダのパスを指定
+outcome_folder <- here("outcome")
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+# Excelファイルの一覧を取得
+excel_files <- list.files(path = outcome_folder, pattern = "\\.xlsx$", full.names = TRUE)
 
-```{r cars}
-summary(cars)
+
+outcome_list <- map(excel_files, ~ {
+  read_excel(.x)
+})
+
+# リストに名前を付ける（ファイル名を使用）
+names(outcome_list) <- basename(excel_files) %>% tools::file_path_sans_ext()
+```
+結合
+```{r}
+combined_oucome <- bind_rows(outcome_list)
+outcome_reordered <- combined_oucome %>%
+  arrange(unitid)
+```
+確認
+```{r}
+head(outcome_reordered)
+```
+2.
+```{r}
+outcome_multiplied <- outcome_reordered %>%
+  mutate(women_gradrate_4yr = women_gradrate_4yr * 0.01)
+```
+確認
+```{r}
+glimpse(outcome_multiplied)
+```
+3.
+```{r}
+#dblに変更
+outcome_dbl <- outcome_multiplied %>%
+  mutate(totcohortsize = as.double(totcohortsize), m_4yrgrads = as.double(m_4yrgrads))
+
+#列を追加
+outcome_divided <- outcome_dbl %>%
+  mutate(men_gradrate_4yr = m_4yrgrads / m_cohortsize)
+```
+確認
+```{r}
+glimpse(outcome_divided)
+```
+4.
+```{r}
+outcome_signif <- outcome_divided %>%
+  mutate(men_gradrate_4yr = signif(men_gradrate_4yr, 3))
+```
+確認
+```{r}
+glimpse(outcome_signif)
+```
+5.
+```{r}
+outcome_filtered <- outcome_signif %>%
+  filter(year < 2011)
+```
+確認
+```{r}
+outcome_filtered %>%
+  count(unitid) %>%
+  print()
+```
+(c)
+1.
+```{r}
+covariates <- read_excel("covariates.xlsx")
+```
+確認
+```{r}
+head(covariates)
+```
+2.
+```{r}
+covariates_renamed <- covariates %>%
+  rename(unitid = university_id)
+```
+確認
+```{r}
+print(covariates_renamed)
+```
+3.
+```{r}
+covariates_cleaned <- covariates_renamed %>%
+  mutate(unitid = str_remove(unitid, "aaaa"))
+```
+確認
+```{r}
+print(covariates_cleaned)
+```
+4.
+```{r}
+covariates_wide <- covariates_cleaned %>%
+  pivot_wider(
+    id_cols = c(unitid, year),
+    names_from = category,
+    values_from = value
+  )
+```
+確認
+```{r}
+print(covariates_wide)
+```
+5.
+```{r}
+covariates_filtered <- covariates_wide %>%
+  filter(year >= 1991 & year <= 2010)
+```
+```{r}
+#-1994
+covariates_filtered <- covariates_filtered %>%
+  filter(year != 1994)
+```
+確認
+```{r}
+covariates_filtered %>%
+  count(unitid) %>%
+print()
+```
+6.
+```{r}
+# unitidを特定
+outcome_unitids <- outcome_filtered %>%
+  distinct(unitid) %>%
+  pull(unitid)
+
+#covariates_filteredをoutcome_filteredのunitidに合わせてフィルタリング
+covariates_filtered_2 <- covariates_filtered %>%
+  filter(unitid %in% outcome_unitids)
+
+#dblに変換
+covariates_filtered_2 <- covariates_filtered_2 %>%
+  mutate(unitid = as.double(unitid))
+
+#確認
+print(n_distinct(outcome_filtered$unitid))
+print(n_distinct(covariates_filtered_2$unitid))
+```
+(d)
+1.
+```{r}
+#確認
+str(seme_with_dummy)
+head(outcome_filtered)
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+#dblに
+covariates_filtered_2 <- covariates_filtered_2 %>%
+  mutate(white_cohortsize = as.double(white_cohortsize),
+         year = as.double(year),
+         instatetuition = as.double(instatetuition),
+         costs = as.double(costs),
+         faculty = as.double(faculty))
+head(covariates_filtered_2)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+# seme_with_dummyとcovariates_filtered_2を結合
+combined_df <- seme_with_dummy %>%
+  left_join(covariates_filtered_2, by = c("unitid", "year"))
+
+# outcome_filteredを結合
+master <- combined_df %>%
+  left_join(outcome_filtered, by = c("unitid", "year"))
+
+# 結合後のデータ確認
+print(names(master))
+
+# データの表示
+print(head(master, 5))
+```
+analysis
+
+(a)
+1.
+```{r}
+str(master)
+```
+
+```{r}
+# 各列のNA数をカウント
+na_counts <- sapply(master, function(x) sum(is.na(x)))
+
+# 結果を表示
+print(na_counts)
+```
+2.
+確認
+```{r}
+library(psych)
+describe(master)
+```
+記述統計
+```{r}
+library(knitr)
+library(kableExtra)
+
+# Switchersと Never switchersを特定する関数
+identify_switchers <- function(data) {
+  data %>%
+    group_by(unitid) %>%
+    filter(year == max(year)) %>%
+    mutate(
+      switcher_status = case_when(
+        semester == 1 ~ "Switcher",
+        semester == 0 ~ "Never Switcher",
+        TRUE ~ "Other"
+      )
+    ) %>%
+    ungroup() %>%
+    select(unitid, switcher_status)
+}
+
+# 記述統計を計算する関数
+calculate_stats <- function(x) {
+  c(mean = mean(x, na.rm = TRUE),
+    sd = sd(x, na.rm = TRUE))
+}
+
+# Switchersと Never switchersを特定
+switchers <- identify_switchers(master)
+
+# masterデータにSwitcher情報を結合
+master_with_switchers <- master %>%
+  left_join(switchers, by = "unitid")
+
+# 指定された変数のリスト
+variables <- c("semester", "quarter", "semester_introduction_year", "semester_dummy",
+               "instatetuition", "costs", "faculty", "white_cohortsize", "totcohortsize",
+               "w_cohortsize", "m_cohortsize", "tot4yrgrads", "m_4yrgrads", "w_4yrgrads",
+               "women_gradrate_4yr", "men_gradrate_4yr")
+
+# 全体、Switchers、Never switchersの記述統計を計算
+stats_all <- master_with_switchers %>%
+  select(all_of(variables)) %>%
+  summarise(across(everything(), calculate_stats)) %>%
+  t() %>%
+  as.data.frame()
+
+stats_switchers <- master_with_switchers %>%
+  filter(switcher_status == "Switcher") %>%
+  select(all_of(variables)) %>%
+  summarise(across(everything(), calculate_stats)) %>%
+  t() %>%
+  as.data.frame()
+
+stats_never_switchers <- master_with_switchers %>%
+  filter(switcher_status == "Never Switcher") %>%
+  select(all_of(variables)) %>%
+  summarise(across(everything(), calculate_stats)) %>%
+  t() %>%
+  as.data.frame()
+
+# 列名を設定
+colnames(stats_all) <- c("Mean_All", "SD_All")
+colnames(stats_switchers) <- c("Mean_Switchers", "SD_Switchers")
+colnames(stats_never_switchers) <- c("Mean_Never", "SD_Never")
+
+# データを結合
+stats_combined <- cbind(stats_all, stats_switchers, stats_never_switchers)
+
+# 平均と標準偏差を小数点以下3桁に丸める
+stats_combined <- round(stats_combined, 3)
+
+# All、Switchers、Never Switchers列を作成
+stats_combined$All <- sprintf("%.3f (%.3f)", stats_combined$Mean_All, stats_combined$SD_All)
+stats_combined$Switchers <- sprintf("%.3f (%.3f)", stats_combined$Mean_Switchers, stats_combined$SD_Switchers)
+stats_combined$Never_Switchers <- sprintf("%.3f (%.3f)", stats_combined$Mean_Never, stats_combined$SD_Never)
+
+# 最終的なデータフレームを作成
+final_stats <- data.frame(
+  Statistic = rownames(stats_combined),
+  All = stats_combined$All,
+  Switchers = stats_combined$Switchers,
+  Never_Switchers = stats_combined$Never_Switchers,
+  stringsAsFactors = FALSE
+)
+
+# Observationsの行を追加
+observations_all <- nrow(master_with_switchers)
+observations_switchers <- sum(master_with_switchers$switcher_status == "Switcher", na.rm = TRUE)
+observations_never <- sum(master_with_switchers$switcher_status == "Never Switcher", na.rm = TRUE)
+final_stats <- rbind(final_stats, c("Observations", as.character(observations_all), 
+                                    as.character(observations_switchers), 
+                                    as.character(observations_never)))
+
+# テーブルを作成して表示
+kable(final_stats, format = "html", escape = TRUE, 
+      col.names = c("", "All", "Switchers", "Never Switchers")) %>%
+  kable_styling(full_width = FALSE) %>%
+  column_spec(2:4, width = "100px") %>%
+  row_spec(0, bold = TRUE)
+```
+
+&lt;style&gt;
+table {
+  border-collapse: collapse;
+  width: auto !important;
+  margin-left: auto;
+  margin-right: auto;
+}
+th, td {
+  border: 1px solid black;
+  padding: 8px;
+  text-align: left;
+}
+th {
+  background-color: #f2f2f2;
+}
+&lt;/style&gt;
+
+3.
+```{r}
+# データの集計
+yearly_averages <- master %>%
+  group_by(year) %>%
+  summarise(
+    women_avg = mean(women_gradrate_4yr, na.rm = TRUE),
+    men_avg = mean(men_gradrate_4yr, na.rm = TRUE)
+  )
+
+# データを長形式に変換
+yearly_averages_long <- yearly_averages %>%
+  tidyr::pivot_longer(cols = c(women_avg, men_avg),
+                      names_to = "gender",
+                      values_to = "avg_gradrate")
+
+# グラフの作成
+ggplot(yearly_averages_long, aes(x = year, y = avg_gradrate, color = gender)) +
+  geom_line() +
+  geom_point() +
+  scale_color_manual(values = c("women_avg" = "red", "men_avg" = "blue"),
+                     labels = c("women_avg" = "Women", "men_avg" = "Men")) +
+  labs(title = "Average 4-Year Graduation Rate by Gender",
+       x = "Year",
+       y = "Average Graduation Rate",
+       color = "Gender") +
+  theme_minimal()
+```
+4.
+```{r}
+# データの集計
+yearly_proportions <- master %>%
+  group_by(year) %>%
+  summarise(
+    semester_1_proportion = mean(semester == 1, na.rm = TRUE)
+  )
+
+# グラフの作成
+ggplot(yearly_proportions, aes(x = year, y = semester_1_proportion)) +
+  geom_line() +
+  geom_point() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(title = "Proportion of unitid with Semester 1 by Year",
+       x = "Year",
+       y = "Proportion of Semester 1") +
+  theme_minimal()
+```
+5.
+```{r}
+library(rlang)
+
+# 散布図作成関数の定義
+create_scatter_plot <- function(data, x_var, y_var = "graduation_rate") {
+  x_var <- enquo(x_var)
+  y_var <- sym(y_var)
+  
+  ggplot(data, aes(x = !!x_var, y = !!y_var)) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    labs(
+      title = paste("Scatter plot of", quo_name(x_var), "vs", y_var),
+      x = quo_name(x_var),
+      y = as_string(y_var)
+    ) +
+    theme_minimal()
+}
+
+# データの準備
+prepared_data <- master %>%
+  mutate(
+    graduation_rate = tot4yrgrads / totcohortsize,
+    w_proportion = w_cohortsize / totcohortsize,
+    white_proportion = white_cohortsize / totcohortsize
+  ) %>%
+  select(graduation_rate, w_proportion, white_proportion, instatetuition) %>%
+  na.omit()
+
+# 散布図の作成
+plot1 <- create_scatter_plot(prepared_data, w_proportion)
+plot2 <- create_scatter_plot(prepared_data, white_proportion)
+plot3 <- create_scatter_plot(prepared_data, instatetuition)
+
+library(gridExtra)
+combined_plot <- grid.arrange(plot1, plot2, plot3, ncol = 2)
+```
+
+(b)
+1.
+```{r}
+library(plm)
+library(stargazer)
+
+# データの準備
+panel_data <- master %>%
+  mutate(
+    graduation_rate = tot4yrgrads / totcohortsize,
+    After = as.factor(semester)
+  ) %>%
+  select(instnm, year, graduation_rate, After) %>%
+  na.omit()
+
+# パネルデータの設定
+pdata <- pdata.frame(panel_data, index = c("instnm", "year"))
+
+# 固定効果モデルの推定
+fe_model <- plm(graduation_rate ~ After, data = pdata, model = "within")
+
+# 結果の表示
+summary_table <- stargazer(fe_model, type = "text", 
+                           title = "Fixed Effects Model Results",
+                           covariate.labels = c("After"),
+                           dep.var.labels = "Graduation Rate")
+```
+
+
+
+
+
+
